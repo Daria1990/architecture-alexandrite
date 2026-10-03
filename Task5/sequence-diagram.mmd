@@ -1,0 +1,51 @@
+sequenceDiagram
+    autonumber
+    actor Op as Оператор
+    participant UI as MES (React)
+    participant API as MES API
+    participant R as Redis (кеш)
+    participant DB as MES DB
+
+    rect rgb(235, 245, 255)
+    Note over Op,DB: Чтение списка заказов (открытие первой страницы)
+    Op->>UI: Открывает первую страницу
+    UI->>API: GET /orders/my
+
+    API->>R: GET my-orders:{operatorId}
+    alt Есть в кеше
+        R-->>API: «Мои заказы»
+    else Нет в кеше
+        R-->>API: пусто
+        API->>DB: SELECT заказы оператора
+        DB-->>API: «Мои заказы»
+        API->>R: SET my-orders:{operatorId}
+    end
+
+    API->>R: GET status-counters
+    alt Есть в кеше
+        R-->>API: счётчики
+    else Нет в кеше
+        R-->>API: пусто
+        API->>DB: COUNT заказов по статусам
+        DB-->>API: счётчики
+        API->>R: SET status-counters, TTL 30 секунд
+    end
+
+    API->>DB: SELECT свободная очередь, самые старые сверху
+    Note right of API: Свободную очередь не кешируем
+    DB-->>API: свободная очередь
+    API-->>UI: «Мои заказы», счётчики, свободная очередь
+    UI-->>Op: Показывает страницу
+    end
+
+    rect rgb(255, 245, 230)
+    Note over Op,DB: Изменение статуса заказа
+    Op->>UI: Меняет статус заказа
+    UI->>API: POST /orders/{id}/status
+    API->>DB: UPDATE статус заказа
+    DB-->>API: ОК
+    API->>R: DEL my-orders:{operatorId}
+    Note right of API: Список соберётся заново из БД<br/>при следующем открытии.<br/>Счётчики обновятся сами через 30 секунд
+    API-->>UI: ОК
+    UI-->>Op: Статус изменён
+    end
